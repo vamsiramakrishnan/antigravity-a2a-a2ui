@@ -29,6 +29,24 @@ from a2a_workspace.storage.adapter import StorageAdapter
 
 @dataclass(frozen=True, slots=True)
 class MaterializedSession:
+    """The per-session directory layout handed to the agent.
+
+    ::
+
+        {root}/
+        ├── skills/            (read-only)  the materialized, digest-verified revision
+        ├── inputs/            (read-write) user uploads for this session
+        ├── work/              (read-write) the agent's working dir; connector
+        │                                   fetches land here and the agent
+        │                                   reads/writes/operates on files here
+        └── antigravity-data/  (read-write) Antigravity SDK app_data_dir (+ .a2a/)
+
+    ``skills`` is the immutable capability surface; everything the agent may
+    mutate lives in ``work`` and ``antigravity-data``. ``inputs`` and ``work``
+    are how uploaded and connector-fetched data become real files the agent can
+    open and process, rather than just text in the conversation.
+    """
+
     session_id: str
     workspace_id: str
     generation: int
@@ -36,6 +54,8 @@ class MaterializedSession:
     root: Path
     skills_dir: Path
     app_data_dir: Path
+    inputs_dir: Path
+    work_dir: Path
 
     def cleanup(self) -> None:
         """Remove the whole session tree. Safe to call more than once."""
@@ -66,8 +86,10 @@ class SessionMaterializer:
         session_root = self._root / workspace_id / session_id
         skills_dir = session_root / "skills"
         app_data_dir = session_root / "antigravity-data"
-        skills_dir.mkdir(parents=True, exist_ok=True)
-        app_data_dir.mkdir(parents=True, exist_ok=True)
+        inputs_dir = session_root / "inputs"
+        work_dir = session_root / "work"
+        for d in (skills_dir, app_data_dir, inputs_dir, work_dir):
+            d.mkdir(parents=True, exist_ok=True)
 
         # 1. Lay down the read-only global catalog first (if any), so the
         #    workspace revision wins on any path collision.
@@ -102,6 +124,8 @@ class SessionMaterializer:
             root=session_root,
             skills_dir=skills_dir,
             app_data_dir=app_data_dir,
+            inputs_dir=inputs_dir,
+            work_dir=work_dir,
         )
 
     def _verify_revision_subset(
