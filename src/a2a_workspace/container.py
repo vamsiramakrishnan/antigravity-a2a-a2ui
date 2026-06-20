@@ -14,13 +14,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import os
+from collections.abc import Callable
+
 from a2a_workspace.broker.broker import (
     CredentialBroker,
     DelegatedOAuthBroker,
     DownscopedCredentialBroker,
 )
 from a2a_workspace.config import Config
+from a2a_workspace.gemini_enterprise.client import DiscoveryEngineClient
+from a2a_workspace.gemini_enterprise.transport import Transport
 from a2a_workspace.identity.authorization import ToolCredential
+from a2a_workspace.identity.session_token import (
+    SessionCredentialStore,
+    SessionTokenService,
+)
 from a2a_workspace.identity.verifier import (
     DevIdentityVerifier,
     IdentityVerifier,
@@ -38,6 +47,11 @@ from a2a_workspace.storage.layout import WorkspaceLayout
 from a2a_workspace.storage.local import LocalStorageAdapter
 
 
+# (access_token) -> DiscoveryEngineClient. Built per request from the user's
+# delegated token; there is no long-lived, ambient Discovery Engine client.
+DiscoveryClientFactory = Callable[[str], DiscoveryEngineClient]
+
+
 @dataclass
 class Container:
     config: Config
@@ -50,9 +64,14 @@ class Container:
     drafts: DraftService
     provisioner: WorkspaceProvisioner
     lifecycle: SessionLifecycle
+    session_tokens: SessionTokenService
+    session_credentials: SessionCredentialStore
+    discovery_client_factory: DiscoveryClientFactory
 
 
-def build_container(config: Config) -> Container:
+def build_container(
+    config: Config, *, discovery_transport: Transport | None = None
+) -> Container:
     identity = _build_identity(config)
     registry = _build_registry(config)
     storage_factory = _build_storage_factory(config)
@@ -80,6 +99,18 @@ def build_container(config: Config) -> Container:
         environment=config.environment,
         region=config.storage.region,
     )
+
+    secret = (config.session_token_secret or os.urandom(32).hex()).encode()
+    session_tokens = SessionTokenService(secret=secret)
+    session_credentials = SessionCredentialStore()
+
+    def discovery_client_factory(access_token: str) -> DiscoveryEngineClient:
+        return DiscoveryEngineClient(
+            config=config.gemini,
+            access_token=access_token,
+            transport=discovery_transport,
+        )
+
     return Container(
         config=config,
         identity=identity,
@@ -91,6 +122,9 @@ def build_container(config: Config) -> Container:
         drafts=drafts,
         provisioner=provisioner,
         lifecycle=lifecycle,
+        session_tokens=session_tokens,
+        session_credentials=session_credentials,
+        discovery_client_factory=discovery_client_factory,
     )
 
 

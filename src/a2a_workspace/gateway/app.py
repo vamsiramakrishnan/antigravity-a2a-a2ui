@@ -21,7 +21,7 @@ from a2a_workspace.errors import (
     ValidationError,
     WorkspaceError,
 )
-from a2a_workspace.gateway import a2a, registry_api
+from a2a_workspace.gateway import a2a, enterprise_api, registry_api
 
 # Domain error -> HTTP status. IntegrityError is a 500: it means stored bytes did
 # not verify, which is a server-side trust failure, not a client mistake.
@@ -59,6 +59,7 @@ def create_app(config: Config | None = None, *, container: Container | None = No
 
     app.include_router(a2a.router)
     app.include_router(registry_api.router)
+    app.include_router(enterprise_api.router)
 
     @app.get("/healthz")
     def healthz() -> dict:

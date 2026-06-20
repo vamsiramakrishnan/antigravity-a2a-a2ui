@@ -26,6 +26,11 @@ gcp = [
     "google-cloud-firestore>=2.16",
     "google-auth>=2.29",
 ]
+# The Antigravity runtime SDK. Optional: the control plane builds and tests
+# without it; only the actual agent runner needs it.
+antigravity = [
+    "google-antigravity",
+]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",

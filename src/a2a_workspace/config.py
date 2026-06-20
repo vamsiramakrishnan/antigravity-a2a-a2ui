@@ -12,6 +12,8 @@ import os
 import uuid
 from dataclasses import dataclass, field
 
+from a2a_workspace.gemini_enterprise.config import GeminiEnterpriseConfig
+
 # Stable namespace for deriving workspace UUIDs from principals. Changing this
 # would re-map every principal to a new workspace, so it is a constant, not a
 # config knob.
@@ -83,6 +85,15 @@ class Config:
     registry: RegistryConfig = field(default_factory=RegistryConfig)
     broker: BrokerConfig = field(default_factory=BrokerConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
+    gemini: GeminiEnterpriseConfig = field(
+        default_factory=lambda: GeminiEnterpriseConfig(project="")
+    )
+    # Public base URL the agent's proxy tools call back to (this gateway).
+    public_url: str = "http://localhost:8080"
+    # HMAC secret for session proxy tokens. Empty -> a process-ephemeral secret is
+    # generated at startup (fine for a single dev instance; set explicitly in prod
+    # so tokens survive across instances).
+    session_token_secret: str = ""
     workspace_namespace: uuid.UUID = WORKSPACE_NAMESPACE
 
     @classmethod
@@ -125,4 +136,7 @@ class Config:
                 ),
                 global_catalog_path=e.get("A2A_GLOBAL_CATALOG_PATH") or None,
             ),
+            gemini=GeminiEnterpriseConfig.from_env(e),
+            public_url=get("A2A_PUBLIC_URL", "http://localhost:8080"),
+            session_token_secret=get("A2A_SESSION_TOKEN_SECRET", ""),
         )

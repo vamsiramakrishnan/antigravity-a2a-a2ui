@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
+from a2a_workspace.antigravity.config_builder import write_session_file
 from a2a_workspace.container import Container
 from a2a_workspace.errors import IsolationError, NotFoundError
 from a2a_workspace.gateway.dependencies import get_container, request_context
@@ -45,14 +46,37 @@ def agent_card(container: Container = Depends(get_container)) -> dict:
                     "never exposed to the model."
                 ),
                 "optional": True,
-            }
+            },
+            {
+                "id": "gemini-enterprise",
+                "type": "oauth2",
+                "description": (
+                    "Delegated Discovery Engine access for the user's connectors "
+                    "and registered agents. Held at the gateway; the agent reaches "
+                    "it only through credential-free proxy tools."
+                ),
+                "optional": True,
+            },
         ],
         "skills": [
             {
                 "id": "open-workspace",
                 "name": "Open workspace",
                 "description": "Materialize and open the user's skill workspace.",
-            }
+            },
+            {
+                "id": "enterprise-search",
+                "name": "Search enterprise data",
+                "description": (
+                    "Answer from the user's Gemini Enterprise connectors "
+                    "(SharePoint, Jira, GitHub, Salesforce, …) with citations."
+                ),
+            },
+            {
+                "id": "invoke-agent",
+                "name": "Invoke another agent",
+                "description": "Delegate a task to another registered Gemini Enterprise agent.",
+            },
         ],
     }
 
@@ -81,7 +105,7 @@ def invoke(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     conv = started.conversation
-    return {
+    response = {
         "conversation_id": conv.conversation_id,
         "workspace_id": conv.workspace_id,
         "generation": conv.generation,
@@ -93,3 +117,31 @@ def invoke(
             "read_only_skills": started.connection.read_only_skills,
         },
     }
+
+    # If Gemini Enterprise is configured and the request carried the user's
+    # delegated token, provision the session so the agent's proxy tools can reach
+    # connectors/agents. The user token is held server-side (decrypt boundary);
+    # the agent gets only a short-lived session proxy token, written to a file in
+    # app_data_dir rather than into the model-visible connection env.
+    if container.config.gemini.is_configured() and ctx.tool_credential is not None:
+        session_token = container.session_tokens.mint(
+            principal_key=ctx.principal.key, conversation_id=conv.conversation_id
+        )
+        container.session_credentials.put(
+            conv.conversation_id, ctx.tool_credential.secret
+        )
+        write_session_file(
+            app_data_dir=started.materialized.app_data_dir,
+            gateway_url=container.config.public_url,
+            session_token=session_token,
+            conversation_id=conv.conversation_id,
+        )
+        response["enterprise"] = {
+            "enabled": True,
+            "gateway_url": container.config.public_url,
+            "session_file": str(
+                started.materialized.app_data_dir / ".a2a" / "session.json"
+            ),
+        }
+
+    return response

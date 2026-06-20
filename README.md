@@ -99,6 +99,41 @@ All via environment (see `src/a2a_workspace/config.py`). Key switches:
 
 Production adapters install with `pip install -e '.[gcp]'`.
 
+## Gemini Enterprise connectors & agent-to-agent
+
+The agent can answer from the user's connectors (SharePoint, Jira, GitHub,
+Salesforce, …) and delegate to other registered Gemini Enterprise agents — via
+the Discovery Engine API — **without ever holding an OAuth credential**. The
+Antigravity tools are thin proxies to the control plane, which holds the user's
+delegated token and makes the credentialed `:streamAssist` call.
+
+Setup is one command plus a few env vars:
+
+```bash
+# Point at your Gemini Enterprise app
+export A2A_GE_PROJECT=my-project A2A_GE_ENGINE=my-app-id   # location defaults to "global"
+export A2A_PUBLIC_URL=https://my-gateway.run.app
+export A2A_SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
+
+# Generate the connectors skill bundle (SKILL.md + proxy tools), then publish it
+python -m a2a_workspace gen-enterprise-skill ./enterprise-skill
+```
+
+At invoke time, if the request carries the user's delegated token, the gateway
+mints a short-lived **session proxy token**, stashes the user token server-side
+for the conversation, and drops a `app_data_dir/.a2a/session.json` the proxy
+tools read. The agent then has four tools: `search_enterprise`,
+`answer_with_web`, `list_enterprise_agents`, `invoke_enterprise_agent`.
+
+| Proxy endpoint (called by the agent runtime) | Purpose |
+| --- | --- |
+| `POST /enterprise/assist` | Grounded answer over the user's connectors |
+| `POST /enterprise/agents/list` | List registered agents that can be invoked |
+| `POST /enterprise/agents/invoke` | Delegate a query to another agent |
+
+These require the session proxy token (not the user token) and fail closed if no
+user credential is associated with the session.
+
 ## Layout
 
 ```
@@ -110,7 +145,9 @@ src/a2a_workspace/
   materializer/  content-addressing + download-and-verify into an isolated tree
   session/       lifecycle, generation-pinned conversations, credential-free connection
   provisioning/  idempotent first-touch workspace + managed-folder IAM
-  gateway/       FastAPI app: A2A endpoints + Workspace REST API
+  gemini_enterprise/  Discovery Engine client + credential-free proxy tools + skill bundle
+  antigravity/   Antigravity SDK wiring (LocalAgentConfig builder, session file)
+  gateway/       FastAPI app: A2A + Workspace REST + enterprise proxy endpoints
   container.py   composition root (the only place concrete backends are named)
 tests/           isolation, integrity, lifecycle, broker, and gateway tests
 ```
