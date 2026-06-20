@@ -38,6 +38,15 @@ class InvokeAgentBody(BaseModel):
     query: str
 
 
+class ApplySkillBody(BaseModel):
+    skill_name: str
+    text: str
+
+
+class FindSkillsBody(BaseModel):
+    query: str
+
+
 def session_token(
     request: Request,
     authorization: str = Header(default=""),
@@ -122,3 +131,41 @@ def invoke_agent(
         body.agent_id, body.query, session=_ge_session(container, st)
     )
     return {"text": result.as_text()}
+
+
+@router.post("/skill")
+def apply_skill(
+    body: ApplySkillBody,
+    st: SessionToken = Depends(session_token),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Apply a Gemini Enterprise assistant skill (Brand Voice, Contract Review, …).
+
+    Routed assistant-mode (no agentsSpec) so the assistant's Skills apply.
+    """
+    client = _client_for(container, st)
+    result = client.apply_skill(
+        body.skill_name, body.text, session=_ge_session(container, st)
+    )
+    return {"text": result.as_text()}
+
+
+@router.post("/skills/find")
+def find_skills(
+    body: FindSkillsBody,
+    st: SessionToken = Depends(session_token),
+    container: Container = Depends(get_container),
+) -> dict:
+    """Semantic discovery over the Skill Registry, so the agent finds skills."""
+    ge_token = container.session_credentials.get(st.conversation_id)
+    if not ge_token:
+        raise HTTPException(
+            status_code=403, detail="no user credential is associated with this session"
+        )
+    client = container.skill_registry_client_factory(ge_token)
+    return {
+        "skills": [
+            {"skill_id": s.skill_id, "display_name": s.display_name, "description": s.description}
+            for s in client.retrieve_skills(body.query)
+        ]
+    }

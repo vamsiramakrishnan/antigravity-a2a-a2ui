@@ -86,6 +86,20 @@ class DiscoveryEngineClient:
         resp = self._post(f"{self._assistant_url()}:streamAssist", body)
         return self._aggregate(resp)
 
+    def apply_skill(
+        self, skill_name: str, text: str, *, session: str | None = None
+    ) -> AssistResult:
+        """Apply a Gemini Enterprise assistant skill (e.g. Brand Voice) to text.
+
+        Deliberately makes an *assistant-mode* call — no ``agentsSpec`` — because
+        the assistant's Skills apply on a plain assist call but not when the
+        request is routed to an agent. The ``@`` mention selects the skill.
+        """
+        prompt = f"@{skill_name}\n\n{text}"
+        body = self._assist_body(prompt, session=session)
+        resp = self._post(f"{self._assistant_url()}:streamAssist", body)
+        return self._aggregate(resp)
+
     def list_agents(self) -> list[AgentInfo]:
         resp = self._get(f"{self._assistant_url()}/agents")
         data = resp.json() or {}

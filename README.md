@@ -130,9 +130,32 @@ tools read. The agent then has four tools: `search_enterprise`,
 | `POST /enterprise/assist` | Grounded answer over the user's connectors |
 | `POST /enterprise/agents/list` | List registered agents that can be invoked |
 | `POST /enterprise/agents/invoke` | Delegate a query to another agent |
+| `POST /enterprise/skill` | Apply a GE assistant skill (Brand Voice, Contract Review, …) |
+| `POST /enterprise/skills/find` | Semantic discovery over the Skill Registry |
 
 These require the session proxy token (not the user token) and fail closed if no
 user credential is associated with the session.
+
+### Programmatic skill management
+
+Skills are managed two ways, bridged by the shared agentskills.io `SKILL.md` ZIP
+format:
+
+* **Our registry** — the bounded draft pipeline publishes immutable workspace
+  revisions (`POST /workspaces/me/drafts ...`).
+* **Gemini Enterprise Skill Registry** — the Vertex AI Platform API
+  (`{loc}-aiplatform.googleapis.com/v1beta1/.../skills`): create/get/list/update/
+  delete, immutable revisions, and semantic `RetrieveSkills`. Wrapped by
+  `SkillRegistryClient`.
+
+Round-trip and sync endpoints (all `/workspaces/me`, scoped to the caller):
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /revisions/{digest}/export-zip` | Download a revision as a GE-importable ZIP |
+| `POST /skills/import-zip` | Import a GE/agentskills.io ZIP → publish as a revision |
+| `POST /skills/registry-push` | Publish a revision to the GE Skill Registry |
+| `POST /skills/registry-import` | Pull a Skill Registry skill → publish as a revision |
 
 ## Layout
 

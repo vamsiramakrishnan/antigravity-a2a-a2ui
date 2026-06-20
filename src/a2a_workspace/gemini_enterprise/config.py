@@ -22,6 +22,10 @@ class GeminiEnterpriseConfig:
     engine: str = ""  # the Gemini Enterprise app id
     assistant: str = "default_assistant"
     api_version: str = "v1alpha"
+    # Skill Registry lives on the Vertex AI Platform API, in its own regions
+    # (us-central1, europe-west4, us-east5) — distinct from the assistant host.
+    skill_registry_location: str = "us-central1"
+    skill_registry_api_version: str = "v1beta1"
 
     @property
     def host(self) -> str:
@@ -59,8 +63,24 @@ class GeminiEnterpriseConfig:
             f"/collections/{self.collection}/dataStores/{data_store_id}"
         )
 
+    @property
+    def skill_registry_base_url(self) -> str:
+        return (
+            f"https://{self.skill_registry_location}-aiplatform.googleapis.com"
+            f"/{self.skill_registry_api_version}"
+        )
+
+    @property
+    def skills_parent(self) -> str:
+        return (
+            f"projects/{self.project}/locations/{self.skill_registry_location}"
+        )
+
     def is_configured(self) -> bool:
         return bool(self.project and self.engine)
+
+    def skill_registry_configured(self) -> bool:
+        return bool(self.project)
 
     @classmethod
     def from_env(cls, env: dict[str, str] | None = None) -> "GeminiEnterpriseConfig":
@@ -72,4 +92,6 @@ class GeminiEnterpriseConfig:
             engine=e.get("A2A_GE_ENGINE", ""),
             assistant=e.get("A2A_GE_ASSISTANT", "default_assistant"),
             api_version=e.get("A2A_GE_API_VERSION", "v1alpha"),
+            skill_registry_location=e.get("A2A_GE_SKILL_LOCATION", "us-central1"),
+            skill_registry_api_version=e.get("A2A_GE_SKILL_API_VERSION", "v1beta1"),
         )

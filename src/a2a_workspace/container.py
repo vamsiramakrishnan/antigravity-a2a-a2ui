@@ -24,6 +24,7 @@ from a2a_workspace.broker.broker import (
 )
 from a2a_workspace.config import Config
 from a2a_workspace.gemini_enterprise.client import DiscoveryEngineClient
+from a2a_workspace.gemini_enterprise.skill_registry import SkillRegistryClient
 from a2a_workspace.gemini_enterprise.transport import Transport
 from a2a_workspace.identity.authorization import ToolCredential
 from a2a_workspace.identity.session_token import (
@@ -47,9 +48,10 @@ from a2a_workspace.storage.layout import WorkspaceLayout
 from a2a_workspace.storage.local import LocalStorageAdapter
 
 
-# (access_token) -> DiscoveryEngineClient. Built per request from the user's
-# delegated token; there is no long-lived, ambient Discovery Engine client.
+# (access_token) -> client. Built per request from the user's delegated token;
+# there is no long-lived, ambient client for either service.
 DiscoveryClientFactory = Callable[[str], DiscoveryEngineClient]
+SkillRegistryClientFactory = Callable[[str], SkillRegistryClient]
 
 
 @dataclass
@@ -67,6 +69,7 @@ class Container:
     session_tokens: SessionTokenService
     session_credentials: SessionCredentialStore
     discovery_client_factory: DiscoveryClientFactory
+    skill_registry_client_factory: SkillRegistryClientFactory
 
 
 def build_container(
@@ -111,6 +114,13 @@ def build_container(
             transport=discovery_transport,
         )
 
+    def skill_registry_client_factory(access_token: str) -> SkillRegistryClient:
+        return SkillRegistryClient(
+            config=config.gemini,
+            access_token=access_token,
+            transport=discovery_transport,
+        )
+
     return Container(
         config=config,
         identity=identity,
@@ -125,6 +135,7 @@ def build_container(
         session_tokens=session_tokens,
         session_credentials=session_credentials,
         discovery_client_factory=discovery_client_factory,
+        skill_registry_client_factory=skill_registry_client_factory,
     )
 
 

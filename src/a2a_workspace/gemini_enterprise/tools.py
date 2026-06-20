@@ -103,9 +103,40 @@ def make_enterprise_tools(
         )
         return result.get("text", "(no answer)")
 
+    def apply_enterprise_skill(skill_name: str, text: str) -> str:
+        """Apply a named Gemini Enterprise skill (e.g. "Brand Voice",
+        "Contract Review") to the given text and return the result.
+
+        Args:
+            skill_name: The display name of the skill to apply.
+            text: The content for the skill to act on.
+        """
+        result = _call(
+            "/enterprise/skill", {"skill_name": skill_name, "text": text}
+        )
+        return result.get("text", "(no result)")
+
+    def find_enterprise_skills(query: str) -> str:
+        """Discover relevant skills in the Skill Registry by intent. Call this
+        when unsure which skill applies, then use apply_enterprise_skill.
+
+        Args:
+            query: A description of the task you need a skill for.
+        """
+        result = _call("/enterprise/skills/find", {"query": query})
+        skills = result.get("skills", [])
+        if not skills:
+            return "No matching skills found."
+        return "\n".join(
+            f"- {s['display_name'] or s['skill_id']}: {s.get('description', '')}"
+            for s in skills
+        )
+
     return [
         search_enterprise,
         answer_with_web,
         list_enterprise_agents,
         invoke_enterprise_agent,
+        apply_enterprise_skill,
+        find_enterprise_skills,
     ]
