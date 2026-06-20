@@ -11,33 +11,40 @@ interaction, classifies the result, and (by default) deletes the agent. The run
 writes a single `results/report-*.md` — **paste that back** and it unblocks the
 remaining work (MCP router mount + trimming/hardening the isolation layer).
 
-## Setup
+## Quick start (interactive)
 
 ```bash
 cd experiments
-cp .env.example .env          # fill PROJECT_ID and GCS_BUCKET (at minimum)
-npm install                   # pulls @google/genai
-gcloud auth application-default login   # or run where ADC is available
+gcloud auth application-default login    # or run where ADC is available
+make setup                               # configure → install → doctor → seed → run → report
+```
 
-# seed two tenant prefixes so cross-tenant reads have something to find
-echo hi | gcloud storage cp - $GCS_BUCKET/workspaces/userA/hello.txt
-echo hi | gcloud storage cp - $GCS_BUCKET/workspaces/userB/hello.txt
+`make setup` prompts for `PROJECT_ID` / `GCS_BUCKET` / etc. (writing a chmod-600
+`.env`), installs `@google/genai`, runs preflight checks, seeds the two tenant
+prefixes, runs all experiments, and prints the report. Re-run any step on its own:
+
+```bash
+make help        # list targets
+make configure   # (re)write .env interactively
+make doctor      # preflight: tools, ADC, API enabled, bucket reachable
+make seed        # write hello.txt into PREFIX_A and PREFIX_B
+make run         # all experiments → results/report-*.md
+make report      # show the latest report
+make cleanup     # delete leftover probe-* agents
+# single experiment: make identity | two-agents | cross-tenant | controls | mcp
 ```
 
 Requires: the `aiplatform` / Gemini Enterprise Agent Platform API enabled, and a
 `base_agent` you can use (default `antigravity-preview-05-2026`).
 
-## Run
+## Manual alternative (no make)
 
 ```bash
-npm run all            # all five experiments → results/report-<stamp>.md
-# or individually:
-npm run identity       # 01  sandbox runtime identity
-npm run two-agents     # 02  per-agent vs shared SA
-npm run cross-tenant   # 03  cross-tenant reach (the direct proof)
-npm run controls       # 04  does agents.create accept capabilities/policies? is allowlist enforced?
-npm run mcp            # 05  /mcp reachability (needs GATEWAY_URL)
-npm run cleanup        # delete any leftover probe agents
+cp .env.example .env          # fill PROJECT_ID and GCS_BUCKET (at minimum)
+npm install                   # pulls @google/genai
+echo hi | gcloud storage cp - $GCS_BUCKET/workspaces/userA/hello.txt
+echo hi | gcloud storage cp - $GCS_BUCKET/workspaces/userB/hello.txt
+npm run all                   # or: identity | two-agents | cross-tenant | controls | mcp | cleanup
 ```
 
 ## What each result means (and what I change because of it)
