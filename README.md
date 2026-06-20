@@ -152,15 +152,22 @@ Enterprise app and both consume our enterprise MCP tools + skills. Full walkthro
 We could not determine from Google's docs **what identity the sandbox runtime
 uses to read its mounted sources** — and that decides whether per-user IAM is
 *enforced* isolation or whether the storage guard remains the real boundary. The
-[`scripts/`](scripts) probes settle it against your project:
+[`experiments/`](experiments) harness settles this (and four related questions)
+against your own project with one interactive command:
 
 ```bash
-cd scripts && npm install
-PROJECT_ID=my-project AGENT=<existing-agent-id> npm run probe:identity   # 3-outcome interpretation in the runbook
-PROJECT_ID=my-project AGENT_ID=demo GCS_BUCKET=gs://my-bucket npm run provision
+cd experiments
+gcloud auth application-default login
+make setup        # configure → install → doctor → seed → run → report
 ```
 
-Operator runbook: [`docs/managed-agents-runbook.md`](docs/managed-agents-runbook.md).
+It provisions throwaway `probe-*` agents, runs five investigations (sandbox
+identity, per-agent vs shared SA, cross-tenant reach, which `agents.create`
+hardening controls are honored, `/mcp` reachability), classifies each outcome,
+cleans up, and writes a single `results/report-*.md`. Every status maps to a
+concrete next action in [`experiments/README.md`](experiments/README.md); the
+lower-level one-off probes live in [`scripts/`](scripts) and the operator
+walkthrough in [`docs/managed-agents-runbook.md`](docs/managed-agents-runbook.md).
 
 ## HTTP surface
 
