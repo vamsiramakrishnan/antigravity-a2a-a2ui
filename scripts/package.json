@@ -1,0 +1,14 @@
+{
+  "name": "managed-agents-probes",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Operator probe/smoke scripts for Gemini Enterprise Managed Agents (Agents + Interactions API). Run `npm install` here before use.",
+  "scripts": {
+    "probe:identity": "node probe_sandbox_identity.mjs",
+    "provision": "node provision_and_run.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "latest"
+  }
+}

@@ -1,89 +1,181 @@
 # antigravity-a2a-a2ui
 
-A2A integration and A2UI for Antigravity: a **shared, stateless control plane**
-that serves a **private, per-user Antigravity skill workspace** to Gemini
-Enterprise users — without ever giving the shared service broad access to any
-user's data.
+A **shared, stateless control plane** that gives every Gemini Enterprise user a
+**private, per-user Antigravity skill workspace** — wrapping Google's **Managed
+Agents** (the Agents API + Interactions API) and supplying the one thing the
+platform does not: **per-end-user tenancy and isolation**, without ever giving
+the shared service broad access to any user's data.
 
-The core idea: tenant isolation is enforced by **Cloud Storage under a per-user
-credential**, derived from a **verified OAuth `(issuer, subject)`** identity —
-not by a shared runtime identity, an email from a prompt, or a GCS FUSE mount.
+> Tenant isolation is derived from a **verified OAuth `(issuer, subject)`** and
+> enforced by **per-user storage scope + one managed agent per user** — not by a
+> shared runtime identity, an email from a prompt, or a GCS FUSE mount.
 
-See [`docs/architecture.md`](docs/architecture.md) for the full design and
-rationale.
+---
 
-## At a glance
+## Why this exists
+
+Google Managed Agents run the Antigravity harness in a managed sandbox. But a
+stored agent config is a **"reusable agent config"** — the Interactions turn
+carries *no* per-user identity or scope; everything lives on the agent resource,
+pinned at create time. So **one config is shared across all callers.**
+
+Per-user isolation therefore requires **one managed agent per user**, each scoped
+to that user's GCS prefix and skills. Provisioning those agents, mapping identity
+to agent, gating skill publication, and brokering credentials **is this control
+plane**. The platform supplies the runtime; we supply the tenancy.
+
+See [`docs/adr/0001-repurpose-onto-interactions-api.md`](docs/adr/0001-repurpose-onto-interactions-api.md)
+for the full build-vs-buy analysis and the keep/repoint/retire map.
+
+## How it works
+
+![architecture](docs/architecture.svg)
+
+The system mirrors the platform's own two planes:
 
 ```
-Gemini Enterprise ──> A2A/A2UI Gateway (Cloud Run, no broad GCS access)
-                         ├─ Workspace Registry  (identity → workspace, revisions, generations)
-                         ├─ Credential Broker   (delegated user OAuth, or CAB-downscoped)
-                         ├─ Trusted StorageAdapter (per-request, workspace-scoped)
-                         ├─ Session Materializer (download immutable revision + verify digest)
-                         └─ Antigravity session  (pinned generation, read-only skills)
+AGENT SETUP  (control plane — once per end-user)
+  A2A invoke ─► verify (iss,sub) ─► derive_agent_id ─► PerUserAgentProvisioner
+                                                          │  agents.create / patch
+                                                          ▼
+                                       Stored config #user-N  (sources = user's
+                                       GCS prefix + Skill Registry skills)
+
+USAGE  (data plane — end-user drives a turn)
+  A2A invoke ─► InteractionOrchestrator ─► Interactions API ─► Antigravity sandbox
+                                              retrieves config #user-N   │
+                                                                         │ MCP (no cred)
+                                                                         ▼
+                                          HTTP MCP server ─► Gateway (holds user token)
+                                                              streamAssist · agents · skills
 ```
 
-Two identity planes are kept apart in code:
+Concepts map one-to-one onto the platform:
 
-* **agentAuthorization** → verified `Principal{issuer, subject}` → workspace id.
+| This project | Native equivalent |
+| --- | --- |
+| Per-user **Workspace** | a per-user **Agent** (`agents/{user-agent-id}`) |
+| Immutable **Revision** | a **Skill + SkillRevision** (native `sha256`) |
+| **Activate generation** | `agents.patch` the `skill_registry` source |
+| **Session / conversation** | an **Interaction** (`interactions.create`) |
+| Materialized skills dir | the sandbox `/.agent/skills/...` mount (native, our format) |
+
+## Security model
+
+Two identity planes are kept apart in code so they cannot be conflated:
+
+* **agentAuthorization** → verified `Principal{issuer, subject}` → agent id.
 * **toolAuthorization** → opaque `ToolCredential`, handed only to the storage
-  adapter, **never** to the model or the Antigravity connection.
+  broker, **never** to the model, the connection, or the sandbox.
 
-## Quickstart
+The user's Gemini Enterprise token is held at the **gateway**. The sandbox agent
+reaches connectors / other agents / skills only through a **credential-free HTTP
+MCP server**, authorized by a short-lived **session proxy token** — so a token
+the model can see is never a token it can exfiltrate.
+
+**In-runtime hardening** (Antigravity SDK `policies` / `hooks` / `triggers`,
+verified against `google-antigravity 0.1.4` — see
+[`docs/adr/0002-...`](docs/adr/0002-antigravity-sdk-advanced-capabilities.md)):
+
+| Capability | Use |
+| --- | --- |
+| `policy.workspace_only(dir)` | confine file tools to the user's session tree |
+| `policy.deny("run_command", when=is_credential_exfil)` | block `gcloud auth print-access-token`, metadata-server, `tokeninfo`, ADC reads |
+| `hooks` (`on_session_*`, `post_tool_call`, `on_tool_error`) | structured audit + secret redaction |
+| `triggers` (`every`, `on_file_change`) | scheduled / react-to-upload skills |
+| `CapabilitiesConfig(disabled_tools=[RUN_COMMAND])` | least-privilege tool surface for skill-only agents |
+
+## Install & test (local)
 
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -e '.[dev]'
-pytest                      # 31 tests covering the isolation invariants
+pytest                              # 144 tests: isolation, integrity, lifecycle, platform client, hardening, agents-cli
 
 # Run the gateway locally (dev identity + local-filesystem "bucket")
 export A2A_ALLOW_INSECURE_DEV=true
 export A2A_STORAGE_LOCAL_ROOT=/tmp/a2a-bucket
-python -m a2a_workspace      # serves on :8080
+python -m a2a_workspace               # serves on :8080
 ```
 
-Dev auth uses an insecure token `Authorization: Bearer <issuer>|<subject>|<email>`
-(production uses a signed OIDC JWT — set `A2A_IDENTITY_BACKEND=jwt`).
+Optional extras: `.[gcp]` (Cloud Storage + Firestore), `.[antigravity]`
+(`google-antigravity` + `google-genai`), `.[adk]` (ADK + a2a-sdk for the
+agents-cli workflow).
 
-End-to-end: author a skill through the bounded tools, then invoke.
+## Deploy to Gemini Enterprise with agents-cli
+
+This repo is an [agents-cli](https://github.com/google/agents-cli) project: the
+root [`agents-cli-manifest.yaml`](agents-cli-manifest.yaml) declares it
+(`language: python`, `agent_directory: app`, `deployment_target: cloud_run`,
+`is_a2a: true`), and [`app/agent.py`](app/agent.py) exposes an ADK `root_agent`
+wired to the same credential-free enterprise tools.
 
 ```bash
-AUTH="Authorization: Bearer https://idp|alice|alice@example.com"
+# 0. Install the CLI and authenticate
+uv tool install google-agents-cli
+agents-cli login
+agents-cli info                       # reads agents-cli-manifest.yaml
 
-DID=$(curl -s -XPOST localhost:8080/workspaces/me/drafts -H "$AUTH" \
-      -H 'Content-Type: application/json' -d '{}' | jq -r .draft_id)
+# 1. Configure the gateway for your Gemini Enterprise app
+export A2A_GE_PROJECT=my-project A2A_GE_ENGINE=my-app-id   # location defaults to "global"
+export A2A_PUBLIC_URL=https://my-gateway.run.app
+export A2A_SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
 
-manifest=$(printf '{"name":"greeter"}' | base64 -w0)
-skill=$(printf "print('hi')" | base64 -w0)
-curl -s -XPUT localhost:8080/workspaces/me/drafts/$DID/files -H "$AUTH" \
-     -H 'Content-Type: application/json' \
-     -d "{\"path\":\"manifest.json\",\"content_base64\":\"$manifest\"}"
-curl -s -XPUT localhost:8080/workspaces/me/drafts/$DID/files -H "$AUTH" \
-     -H 'Content-Type: application/json' \
-     -d "{\"path\":\"skill.py\",\"content_base64\":\"$skill\"}"
+# 2. Deploy the control-plane gateway (serves the A2A agent card)
+agents-cli deploy                     # → Cloud Run (or: gcloud run deploy)
 
-curl -s -XPOST localhost:8080/workspaces/me/drafts/$DID/validate -H "$AUTH"
-curl -s -XPOST localhost:8080/workspaces/me/drafts/$DID/submit   -H "$AUTH"
-curl -s -XPOST localhost:8080/workspaces/me/drafts/$DID/publish  -H "$AUTH" \
-     -H 'Content-Type: application/json' -d '{"activate":true}'
+# 3. Grant the Discovery Engine SA permission to invoke the Cloud Run service
+gcloud run services add-iam-policy-binding my-gateway \
+  --member="serviceAccount:service-<PROJECT_NUMBER>@gcp-sa-discoveryengine.iam.gserviceaccount.com" \
+  --role="roles/run.servicesInvoker" --region=<REGION>
 
-curl -s -XPOST localhost:8080/a2a/invoke -H "$AUTH"   # → pinned conversation + credential-free connection
+# 4. Register the agent into your Gemini Enterprise app (fetches our A2A card)
+agents-cli publish gemini-enterprise \
+  --registration-type a2a \
+  --agent-card-url https://my-gateway.run.app/a2a/app/.well-known/agent-card.json \
+  --gemini-enterprise-app-id projects/<n>/locations/global/collections/default_collection/engines/my-app-id \
+  --display-name "Antigravity Skill Assistant"
 ```
+
+The gateway serves the A2A card at both `/.well-known/agent.json` (native) and
+`/a2a/app/.well-known/agent-card.json` (agents-cli/A2A schema). The exact publish
+argv is generated by `a2a_workspace.integrations.agents_cli.build_publish_command`.
+
+**Two runtimes, one app.** ADK agents built with agents-cli deploy to Agent
+Runtime / Cloud Run as reasoning engines; our **per-user managed agents** use the
+Antigravity sandbox via the Agents API. Both register into the same Gemini
+Enterprise app and both consume our enterprise MCP tools + skills. Full walkthrough:
+[`docs/agents-cli-integration.md`](docs/agents-cli-integration.md).
+
+## Verify against a live tenant
+
+We could not determine from Google's docs **what identity the sandbox runtime
+uses to read its mounted sources** — and that decides whether per-user IAM is
+*enforced* isolation or whether the storage guard remains the real boundary. The
+[`scripts/`](scripts) probes settle it against your project:
+
+```bash
+cd scripts && npm install
+PROJECT_ID=my-project AGENT=<existing-agent-id> npm run probe:identity   # 3-outcome interpretation in the runbook
+PROJECT_ID=my-project AGENT_ID=demo GCS_BUCKET=gs://my-bucket npm run provision
+```
+
+Operator runbook: [`docs/managed-agents-runbook.md`](docs/managed-agents-runbook.md).
 
 ## HTTP surface
 
 | Method & path | Purpose |
 | --- | --- |
-| `GET /.well-known/agent.json` | A2A agent card advertising both auth planes |
-| `POST /a2a/invoke` | Provision + materialize active generation; start a pinned conversation |
-| `GET /workspaces/me` | The caller's own workspace metadata |
-| `POST /workspaces/me/drafts` | Open a draft (optionally from a base revision) |
-| `PUT /workspaces/me/drafts/{id}/files` | `apply_patch` (base64 body; `null` deletes) |
-| `POST /workspaces/me/drafts/{id}/validate` \| `/submit` \| `/publish` | Bounded publish pipeline |
+| `GET /.well-known/agent.json` | Native A2A agent card (two auth planes) |
+| `GET /a2a/app/.well-known/agent-card.json` | agents-cli / A2A-schema card |
+| `POST /a2a/invoke` | Provision + start a pinned conversation for the verified principal |
+| `POST /mcp/tools/list` · `/mcp/tools/call` | Credential-free enterprise tools for the sandbox (session-token authed) |
+| `POST /workspaces/me/drafts` … `/validate` `/submit` `/publish` | Bounded skill publish pipeline |
+| `POST /enterprise/assist` · `/agents/*` · `/skill` · `/skills/find` | Gateway-brokered Discovery Engine calls |
+| `POST /workspaces/me/skills/registry-push` · `registry-import` · `import-zip` | Skill Registry round-trip (agentskills.io ZIP) |
 
-Every workspace route resolves the workspace from the **verified principal**
-(`/me`) — never from a path parameter — so a caller can only act on their own
-workspace.
+Every `/workspaces/me` route resolves the workspace from the **verified
+principal** — never a path parameter — so a caller can only act on their own.
 
 ## Configuration
 
@@ -95,85 +187,36 @@ All via environment (see `src/a2a_workspace/config.py`). Key switches:
 | `A2A_ALLOW_INSECURE_DEV` | `false` | must be `true` to enable the dev verifier |
 | `A2A_STORAGE_BACKEND` | `local` | `gcs` requires the `gcp` extra |
 | `A2A_REGISTRY_BACKEND` | `memory` | `firestore` requires the `gcp` extra |
-| `A2A_STORAGE_BUCKET` | `skills-local` | one bucket per org × env × region |
-
-Production adapters install with `pip install -e '.[gcp]'`.
-
-## Gemini Enterprise connectors & agent-to-agent
-
-The agent can answer from the user's connectors (SharePoint, Jira, GitHub,
-Salesforce, …) and delegate to other registered Gemini Enterprise agents — via
-the Discovery Engine API — **without ever holding an OAuth credential**. The
-Antigravity tools are thin proxies to the control plane, which holds the user's
-delegated token and makes the credentialed `:streamAssist` call.
-
-Setup is one command plus a few env vars:
-
-```bash
-# Point at your Gemini Enterprise app
-export A2A_GE_PROJECT=my-project A2A_GE_ENGINE=my-app-id   # location defaults to "global"
-export A2A_PUBLIC_URL=https://my-gateway.run.app
-export A2A_SESSION_TOKEN_SECRET=$(openssl rand -hex 32)
-
-# Generate the connectors skill bundle (SKILL.md + proxy tools), then publish it
-python -m a2a_workspace gen-enterprise-skill ./enterprise-skill
-```
-
-At invoke time, if the request carries the user's delegated token, the gateway
-mints a short-lived **session proxy token**, stashes the user token server-side
-for the conversation, and drops a `app_data_dir/.a2a/session.json` the proxy
-tools read. The agent then has four tools: `search_enterprise`,
-`answer_with_web`, `list_enterprise_agents`, `invoke_enterprise_agent`.
-
-| Proxy endpoint (called by the agent runtime) | Purpose |
-| --- | --- |
-| `POST /enterprise/assist` | Grounded answer over the user's connectors |
-| `POST /enterprise/agents/list` | List registered agents that can be invoked |
-| `POST /enterprise/agents/invoke` | Delegate a query to another agent |
-| `POST /enterprise/skill` | Apply a GE assistant skill (Brand Voice, Contract Review, …) |
-| `POST /enterprise/skills/find` | Semantic discovery over the Skill Registry |
-
-These require the session proxy token (not the user token) and fail closed if no
-user credential is associated with the session.
-
-### Programmatic skill management
-
-Skills are managed two ways, bridged by the shared agentskills.io `SKILL.md` ZIP
-format:
-
-* **Our registry** — the bounded draft pipeline publishes immutable workspace
-  revisions (`POST /workspaces/me/drafts ...`).
-* **Gemini Enterprise Skill Registry** — the Vertex AI Platform API
-  (`{loc}-aiplatform.googleapis.com/v1beta1/.../skills`): create/get/list/update/
-  delete, immutable revisions, and semantic `RetrieveSkills`. Wrapped by
-  `SkillRegistryClient`.
-
-Round-trip and sync endpoints (all `/workspaces/me`, scoped to the caller):
-
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /revisions/{digest}/export-zip` | Download a revision as a GE-importable ZIP |
-| `POST /skills/import-zip` | Import a GE/agentskills.io ZIP → publish as a revision |
-| `POST /skills/registry-push` | Publish a revision to the GE Skill Registry |
-| `POST /skills/registry-import` | Pull a Skill Registry skill → publish as a revision |
+| `A2A_GE_PROJECT` / `A2A_GE_ENGINE` | — | the target Gemini Enterprise app |
+| `A2A_PUBLIC_URL` | `http://localhost:8080` | the gateway's externally reachable URL |
 
 ## Layout
 
 ```
 src/a2a_workspace/
-  identity/      two identity planes: Principal, verifiers, opaque ToolCredential
-  registry/      workspace/revision/generation models + bounded draft→publish tools
-  storage/       trusted StorageAdapter (local + GCS), workspace key layout & guards
-  broker/        credential broker: delegated OAuth or CAB-downscoped credentials
-  materializer/  content-addressing + download-and-verify into an isolated tree
-  session/       lifecycle, generation-pinned conversations, credential-free connection
-  provisioning/  idempotent first-touch workspace + managed-folder IAM
-  gemini_enterprise/  Discovery Engine client + credential-free proxy tools + skill bundle
-  antigravity/   Antigravity SDK wiring (LocalAgentConfig builder, session file)
-  gateway/       FastAPI app: A2A + Workspace REST + enterprise proxy endpoints
-  container.py   composition root (the only place concrete backends are named)
-tests/           isolation, integrity, lifecycle, broker, and gateway tests
+  identity/           two planes: Principal, verifiers, opaque ToolCredential, session tokens
+  registry/           workspace/revision/generation models + bounded draft→publish pipeline
+  storage/            trusted StorageAdapter (local + GCS), workspace key layout & guards
+  broker/             credential broker: delegated OAuth or CAB-downscoped credentials
+  provisioning/       first-touch workspace IAM  +  PerUserAgentProvisioner (agents.create/patch)
+  session/            generation-pinned conversations  +  InteractionOrchestrator
+  gemini_enterprise/  Discovery Engine + Skill Registry + Agent Platform clients + proxy tools
+  antigravity/        SDK wiring: advanced config, hooks, policies, triggers, exfil hardening
+  integrations/       agents-cli: manifest, A2A card adapter, publish-command builder
+  gateway/            FastAPI app: A2A card, workspace REST, enterprise proxy, MCP server, agents-cli compat
+  container.py        composition root (the only place concrete backends are named)
+app/                  ADK root_agent for the agents-cli workflow
+scripts/              live-tenant probes (sandbox identity, provision + interact)
+docs/                 architecture, ADRs, agents-cli integration, runbook
 ```
+
+## Docs
+
+- [`docs/architecture.md`](docs/architecture.md) — isolation design and rationale
+- [`docs/adr/0001-...`](docs/adr/0001-repurpose-onto-interactions-api.md) — Managed Agents build-vs-buy + repurpose map
+- [`docs/adr/0002-...`](docs/adr/0002-antigravity-sdk-advanced-capabilities.md) — hooks / policies / triggers
+- [`docs/agents-cli-integration.md`](docs/agents-cli-integration.md) — deploy & publish via agents-cli
+- [`docs/managed-agents-runbook.md`](docs/managed-agents-runbook.md) — verify against a live tenant
 
 ## License
 

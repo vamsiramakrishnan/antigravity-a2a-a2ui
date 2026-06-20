@@ -24,8 +24,13 @@ from a2a_workspace.messaging import materialize_inputs, parse_invocation
 router = APIRouter()
 
 
-@router.get("/.well-known/agent.json")
-def agent_card(container: Container = Depends(get_container)) -> dict:
+def build_card(container: Container) -> dict:
+    """The A2A agent card, as a plain dict.
+
+    Factored out of the route so other surfaces (e.g. the agents-cli compat
+    endpoint that re-serves the card at ``/a2a/app/.well-known/agent-card.json``)
+    can reuse the *single* source of card content rather than duplicating it.
+    """
     org = container.config.organization
     return {
         "name": f"{org}-antigravity-workspace",
@@ -80,6 +85,11 @@ def agent_card(container: Container = Depends(get_container)) -> dict:
             },
         ],
     }
+
+
+@router.get("/.well-known/agent.json")
+def agent_card(container: Container = Depends(get_container)) -> dict:
+    return build_card(container)
 
 
 @router.post("/a2a/invoke")

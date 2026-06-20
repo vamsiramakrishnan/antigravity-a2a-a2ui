@@ -1,0 +1,35 @@
+# agents-cli project manifest.
+#
+# This file makes the Antigravity A2A/A2UI control plane a first-class
+# google-agents-cli (`google-agents-cli`, CLI `agents-cli`) project. With it
+# present at the repo root, the toolchain can:
+#
+#   * build/run the ADK agent under `app/` locally (`agents-cli run`),
+#   * deploy the gateway as an A2A service to Cloud Run
+#     (deployment_target: cloud_run, is_a2a: true), and
+#   * publish the served A2A agent card into a Gemini Enterprise app
+#     (`agents-cli publish gemini-enterprise --registration-type a2a ...`).
+#
+# The agent itself lives at `<agent_directory>/agent.py` exposing the
+# module-level `root_agent` and `app` objects that ADK / agents-cli expect. It
+# reuses the same enterprise proxy tools the gateway already brokers, so the
+# reasoning-engine agent and our per-user managed agents share one tool surface
+# and register into the same Gemini Enterprise app. See
+# docs/agents-cli-integration.md for the full workflow.
+
+name: antigravity-a2a-a2ui
+acli_version: 0.5.0
+agent_directory: app
+region: us-east1
+base_template: adk_a2a
+generated_at: "2026-06-20T00:00:00Z"
+language: python
+
+create_params:
+  deployment_target: cloud_run
+  session_type: none
+  cicd_runner: google-cloud-build
+  include_data_ingestion: false
+  is_a2a: true
+  datastore: none
+  agent_guidance_filename: AGENTS.md

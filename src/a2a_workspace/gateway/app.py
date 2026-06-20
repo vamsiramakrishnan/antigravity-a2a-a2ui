@@ -22,6 +22,7 @@ from a2a_workspace.errors import (
     WorkspaceError,
 )
 from a2a_workspace.gateway import a2a, enterprise_api, registry_api
+from a2a_workspace.gateway.agents_cli_compat import create_agents_cli_compat_router
 
 # Domain error -> HTTP status. IntegrityError is a 500: it means stored bytes did
 # not verify, which is a server-side trust failure, not a client mistake.
@@ -60,6 +61,15 @@ def create_app(config: Config | None = None, *, container: Container | None = No
     app.include_router(a2a.router)
     app.include_router(registry_api.router)
     app.include_router(enterprise_api.router)
+    # agents-cli / A2A compatibility: re-serve the same agent card at the path
+    # `agents-cli publish gemini-enterprise --registration-type a2a` fetches.
+    # `build_card` is the single source of card content (see gateway/a2a.py).
+    app.include_router(
+        create_agents_cli_compat_router(
+            card_provider=lambda: a2a.build_card(ctr),
+            base_url=cfg.public_url,
+        )
+    )
 
     @app.get("/healthz")
     def healthz() -> dict:
