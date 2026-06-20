@@ -18,3 +18,8 @@ htmlcov/
 # Local runtime state (stand-in bucket + materialized sessions)
 .local-storage/
 /tmp/a2a-*
+
+# Node / experiments harness
+node_modules/
+experiments/results/
+.env

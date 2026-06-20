@@ -1,0 +1,19 @@
+{
+  "name": "antigravity-isolation-experiments",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Automated probes that settle the open sandbox-identity / isolation questions against a live Gemini Enterprise project.",
+  "scripts": {
+    "all": "node run_all.mjs",
+    "identity": "node run_all.mjs 01",
+    "two-agents": "node run_all.mjs 02",
+    "cross-tenant": "node run_all.mjs 03",
+    "controls": "node run_all.mjs 04",
+    "mcp": "node run_all.mjs 05",
+    "cleanup": "node cleanup.mjs"
+  },
+  "dependencies": {
+    "@google/genai": "latest"
+  }
+}
