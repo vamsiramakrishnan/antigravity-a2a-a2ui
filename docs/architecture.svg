@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="560" font-family="ui-sans-serif,Segoe UI,Helvetica,Arial,sans-serif" font-size="13">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5f6368"/>
+    </marker>
+    <style>
+      .panel{fill:#fff;stroke:#4285f4;stroke-dasharray:6 4;rx:12;}
+      .title{font-size:16px;font-weight:700;fill:#202124;}
+      .box{fill:#e8f0fe;stroke:#4285f4;rx:8;}
+      .boxg{fill:#e6f4ea;stroke:#34a853;rx:8;}
+      .boxy{fill:#fef7e0;stroke:#f9ab00;rx:8;}
+      .lbl{fill:#202124;font-weight:600;}
+      .sub{fill:#5f6368;font-size:11px;}
+      .edge{stroke:#5f6368;stroke-width:1.5;fill:none;marker-end:url(#arrow);}
+      .note{fill:#5f6368;font-size:11px;font-style:italic;}
+    </style>
+  </defs>
+
+  <text x="24" y="28" class="title">antigravity-a2a-a2ui — per-user tenancy plane over Google Managed Agents</text>
+
+  <!-- AGENT SETUP / CONTROL PLANE -->
+  <rect x="20" y="48" width="920" height="210" class="panel"/>
+  <text x="40" y="74" class="title">Agent Setup · control plane (run once per end-user)</text>
+
+  <rect x="40" y="92" width="150" height="58" class="box"/>
+  <text x="52" y="116" class="lbl">A2A invoke</text>
+  <text x="52" y="134" class="sub">verify OIDC (iss,sub)</text>
+
+  <rect x="214" y="92" width="170" height="58" class="box"/>
+  <text x="226" y="116" class="lbl">identity → agent id</text>
+  <text x="226" y="134" class="sub">derive_agent_id(Principal)</text>
+
+  <rect x="408" y="92" width="200" height="58" class="boxy"/>
+  <text x="420" y="116" class="lbl">PerUserAgentProvisioner</text>
+  <text x="420" y="134" class="sub">agents.create / patch (scoped)</text>
+
+  <rect x="632" y="92" width="288" height="58" class="box"/>
+  <text x="644" y="116" class="lbl">Agents API → Stored agent config</text>
+  <text x="644" y="134" class="sub">base_environment.sources = THIS user's GCS prefix + skills</text>
+
+  <rect x="214" y="172" width="170" height="62" class="boxy"/>
+  <text x="226" y="196" class="lbl">draft → publish</text>
+  <text x="226" y="214" class="sub">validate gate →</text>
+  <text x="226" y="228" class="sub">Skill Registry (sha256)</text>
+
+  <rect x="408" y="172" width="200" height="62" class="box"/>
+  <text x="420" y="196" class="lbl">Credential broker</text>
+  <text x="420" y="214" class="sub">per-user storage cred;</text>
+  <text x="420" y="228" class="sub">never on the connection</text>
+
+  <line x1="190" y1="121" x2="214" y2="121" class="edge"/>
+  <line x1="384" y1="121" x2="408" y2="121" class="edge"/>
+  <line x1="608" y1="121" x2="632" y2="121" class="edge"/>
+  <line x1="299" y1="172" x2="299" y2="150" class="edge"/>
+  <line x1="508" y1="172" x2="508" y2="150" class="edge"/>
+
+  <!-- USAGE / DATA PLANE -->
+  <rect x="20" y="282" width="920" height="244" class="panel"/>
+  <text x="40" y="308" class="title">Usage · data plane (real end-user drives a turn against THEIR agent)</text>
+
+  <rect x="40" y="326" width="150" height="58" class="box"/>
+  <text x="52" y="350" class="lbl">A2A invoke</text>
+  <text x="52" y="368" class="sub">end-user prompt</text>
+
+  <rect x="214" y="326" width="180" height="58" class="boxy"/>
+  <text x="226" y="350" class="lbl">InteractionOrchestrator</text>
+  <text x="226" y="368" class="sub">ensure agent → interact</text>
+
+  <rect x="418" y="326" width="190" height="58" class="box"/>
+  <text x="430" y="350" class="lbl">Interactions API</text>
+  <text x="430" y="368" class="sub">retrieves config #user-N</text>
+
+  <rect x="632" y="318" width="288" height="120" class="boxg"/>
+  <text x="644" y="342" class="lbl">Harness + Runtime (Antigravity sandbox)</text>
+  <text x="644" y="362" class="sub">code_execution · filesystem · skills mount</text>
+  <text x="644" y="380" class="sub">/.agent/skills/&lt;skill&gt;/{SKILL.md, scripts/}</text>
+  <text x="644" y="402" class="sub">policies · hooks · triggers (in-runtime hardening)</text>
+  <text x="644" y="420" class="sub">↕ calls our HTTP MCP server (no user credential)</text>
+
+  <rect x="418" y="430" width="190" height="58" class="boxy"/>
+  <text x="430" y="454" class="lbl">HTTP MCP server</text>
+  <text x="430" y="472" class="sub">/mcp · enterprise proxy</text>
+
+  <rect x="632" y="458" width="288" height="56" class="box"/>
+  <text x="644" y="482" class="lbl">Gateway (holds user GE token)</text>
+  <text x="644" y="500" class="sub">streamAssist · agents · Skill Registry</text>
+
+  <line x1="190" y1="355" x2="214" y2="355" class="edge"/>
+  <line x1="394" y1="355" x2="418" y2="355" class="edge"/>
+  <line x1="608" y1="355" x2="632" y2="355" class="edge"/>
+  <line x1="632" y1="459" x2="608" y2="459" class="edge"/>
+  <line x1="608" y1="487" x2="632" y2="487" class="edge"/>
+  <text x="40" y="514" class="note">Isolation: one stored config per user, scoped to that user's prefix/skills · token held at the gateway, brokered to the sandbox over MCP — never given to the model.</text>
+</svg>

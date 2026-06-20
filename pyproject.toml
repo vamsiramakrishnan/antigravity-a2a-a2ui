@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "antigravity-a2a-a2ui"
+version = "0.1.0"
+description = "Secure multi-tenant A2A/A2UI workspace gateway for Antigravity skills on Gemini Enterprise"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Apache-2.0" }
+authors = [{ name = "antigravity-a2a-a2ui contributors" }]
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2.6",
+    "uvicorn[standard]>=0.30",
+    "pyjwt[crypto]>=2.8",
+]
+
+[project.optional-dependencies]
+# Production adapters. Kept optional so the control plane runs locally without
+# pulling cloud SDKs, and so import of a cloud module fails loudly when its
+# extra is missing rather than silently degrading isolation.
+gcp = [
+    "google-cloud-storage>=2.16",
+    "google-cloud-firestore>=2.16",
+    "google-auth>=2.29",
+]
+# The Antigravity runtime SDK + GenAI client. Optional: the control plane builds
+# and tests without them (SDK use is import-guarded). The agent runner needs the
+# SDK; the Managed Agents (Agents + Interactions API) client prefers google-genai.
+antigravity = [
+    "google-antigravity>=0.1.4",
+    "google-genai>=1.0",
+]
+# ADK + A2A surface for the agents-cli workflow (app/agent.py exposes an ADK
+# root_agent; `agents-cli` itself is installed separately via uv/pipx).
+adk = [
+    "google-adk[gcp]>=2.0.0,<3.0.0",
+    "a2a-sdk[http-server]~=0.3.22",
+]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "pyyaml>=6.0",
+]
+
+[project.scripts]
+a2a-workspace = "a2a_workspace.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+addopts = "-q"
