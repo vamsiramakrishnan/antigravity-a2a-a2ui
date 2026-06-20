@@ -48,24 +48,28 @@ def write_session_file(
     gateway_url: str,
     session_token: str,
     conversation_id: str,
+    inputs_dir: Path | str | None = None,
+    work_dir: Path | str | None = None,
 ) -> Path:
     """Drop the session file the proxy tools read. Returns its path.
 
     Kept out of the connection ``env`` on purpose: the token rides in a file under
     the agent's data dir, scoped and short-lived, never in the model-visible
-    connection configuration.
+    connection configuration. ``inputs_dir``/``work_dir`` let the agent's tools
+    locate uploaded files and a place to write fetched artifacts.
     """
     target = Path(app_data_dir) / ".a2a" / "session.json"
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(
-        json.dumps(
-            {
-                "gateway_url": gateway_url,
-                "session_token": session_token,
-                "conversation_id": conversation_id,
-            }
-        )
-    )
+    payload = {
+        "gateway_url": gateway_url,
+        "session_token": session_token,
+        "conversation_id": conversation_id,
+    }
+    if inputs_dir is not None:
+        payload["inputs_dir"] = str(inputs_dir)
+    if work_dir is not None:
+        payload["work_dir"] = str(work_dir)
+    target.write_text(json.dumps(payload))
     return target
 
 

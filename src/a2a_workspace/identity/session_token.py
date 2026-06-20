@@ -97,13 +97,27 @@ class SessionCredentialStore:
     """
 
     def __init__(self) -> None:
-        self._by_conversation: dict[str, str] = {}
+        self._tokens: dict[str, str] = {}
+        self._sessions: dict[str, str] = {}
 
-    def put(self, conversation_id: str, ge_access_token: str) -> None:
-        self._by_conversation[conversation_id] = ge_access_token
+    def put(
+        self, conversation_id: str, ge_access_token: str, *, ge_session: str = ""
+    ) -> None:
+        self._tokens[conversation_id] = ge_access_token
+        if ge_session:
+            self._sessions[conversation_id] = ge_session
 
     def get(self, conversation_id: str) -> str | None:
-        return self._by_conversation.get(conversation_id)
+        return self._tokens.get(conversation_id)
+
+    def get_session(self, conversation_id: str) -> str:
+        """Return the Discovery Engine session for this conversation, or ''.
+
+        Lets the enterprise proxy reuse the same streamAssist session so connector
+        calls see the conversation history and uploaded context files.
+        """
+        return self._sessions.get(conversation_id, "")
 
     def drop(self, conversation_id: str) -> None:
-        self._by_conversation.pop(conversation_id, None)
+        self._tokens.pop(conversation_id, None)
+        self._sessions.pop(conversation_id, None)

@@ -272,6 +272,73 @@ def _b64(data: bytes) -> str:
     return base64.b64encode(data).decode()
 
 
+def test_invoke_with_uploaded_file_and_session_threading(tmp_path):
+    from pathlib import Path
+
+    config = _config(tmp_path)
+    discovery = FakeDiscoveryTransport()
+    container = build_container(config, discovery_transport=discovery)
+    app = create_app(config, container=container)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer https://idp|author|a@x.com"}
+
+    # Publish a skill so the workspace has an active generation.
+    did = client.post("/workspaces/me/drafts", headers=headers, json={}).json()[
+        "draft_id"
+    ]
+    for path, data in generate_skill_bundle().items():
+        client.put(
+            f"/workspaces/me/drafts/{did}/files",
+            headers=headers,
+            json={"path": path, "content_base64": _b64(data)},
+        )
+    client.post(f"/workspaces/me/drafts/{did}/validate", headers=headers)
+    client.post(f"/workspaces/me/drafts/{did}/submit", headers=headers)
+    client.post(f"/workspaces/me/drafts/{did}/publish", headers=headers, json={})
+
+    # Invoke the way Gemini Enterprise would: a message with a prompt + an
+    # uploaded file, plus the Discovery Engine session.
+    ge_session = "projects/p/locations/global/.../sessions/sess-xyz"
+    invoked = client.post(
+        "/a2a/invoke",
+        headers={**headers, "X-Tool-Authorization": "user-ge-token"},
+        json={
+            "session": ge_session,
+            "message": {
+                "role": "user",
+                "parts": [
+                    {"kind": "text", "text": "Summarize the attached report"},
+                    {
+                        "kind": "file",
+                        "file": {
+                            "name": "report.txt",
+                            "mimeType": "text/plain",
+                            "bytes": _b64(b"quarterly numbers"),
+                        },
+                    },
+                ],
+            },
+        },
+    ).json()
+
+    # The prompt and uploaded file are surfaced; the file is on disk in inputs/.
+    assert invoked["prompt"] == "Summarize the attached report"
+    assert invoked["inputs"][0]["name"] == "report.txt"
+    inputs_dir = Path(invoked["connection"]["inputs_dir"])
+    assert (inputs_dir / "report.txt").read_bytes() == b"quarterly numbers"
+
+    # Now the agent's proxy tool calls back; the proxy must reuse the SAME
+    # Discovery Engine session so connector calls share the uploaded context.
+    session_info = json.loads(Path(invoked["enterprise"]["session_file"]).read_text())
+    resp = client.post(
+        "/enterprise/assist",
+        headers={"Authorization": f"Bearer {session_info['session_token']}"},
+        json={"query": "what were the numbers?"},
+    )
+    assert resp.status_code == 200
+    assert discovery.last_body["session"] == ge_session
+
+
 def test_enterprise_endpoint_rejects_bad_session_token(tmp_path):
     config = _config(tmp_path)
     container = build_container(config, discovery_transport=FakeDiscoveryTransport())

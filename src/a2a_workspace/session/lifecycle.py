@@ -66,7 +66,7 @@ class SessionLifecycle:
         self._env = environment
         self._region = region
 
-    def start(self, ctx: RequestContext) -> StartedSession:
+    def start(self, ctx: RequestContext, *, ge_session: str = "") -> StartedSession:
         principal = ctx.principal
 
         workspace = self._registry.ensure_workspace(
@@ -105,6 +105,7 @@ class SessionLifecycle:
             workspace_id=workspace.workspace_id,
             generation=generation.number,
             content_digest=generation.content_digest,
+            ge_session=ge_session,
         )
 
         return StartedSession(

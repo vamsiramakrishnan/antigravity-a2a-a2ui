@@ -65,6 +65,12 @@ def _client_for(container: Container, st: SessionToken):
     return container.discovery_client_factory(ge_token)
 
 
+def _ge_session(container: Container, st: SessionToken) -> str | None:
+    # Reuse the inbound streamAssist session so connector calls share its history
+    # and uploaded context files. Empty -> the client allocates a new session.
+    return container.session_credentials.get_session(st.conversation_id) or None
+
+
 @router.post("/assist")
 def assist(
     body: AssistBody,
@@ -74,6 +80,7 @@ def assist(
     client = _client_for(container, st)
     result = client.assist(
         body.query,
+        session=_ge_session(container, st),
         data_store_ids=tuple(body.data_store_ids),
         google_search=body.google_search,
     )
@@ -111,5 +118,7 @@ def invoke_agent(
     container: Container = Depends(get_container),
 ) -> dict:
     client = _client_for(container, st)
-    result = client.invoke_agent(body.agent_id, body.query)
+    result = client.invoke_agent(
+        body.agent_id, body.query, session=_ge_session(container, st)
+    )
     return {"text": result.as_text()}

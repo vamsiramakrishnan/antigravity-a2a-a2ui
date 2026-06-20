@@ -25,6 +25,10 @@ class Conversation:
     workspace_id: str
     generation: int
     content_digest: str
+    # The Discovery Engine session this turn belongs to, carried from the inbound
+    # streamAssist invocation. Threaded into the enterprise proxy so connector
+    # calls share the same session history and uploaded context files.
+    ge_session: str = ""
     created_at_epoch: float = field(default_factory=time.time)
 
 
@@ -40,6 +44,7 @@ class ConversationStore:
         workspace_id: str,
         generation: int,
         content_digest: str,
+        ge_session: str = "",
     ) -> Conversation:
         conv = Conversation(
             conversation_id=f"conv_{uuid.uuid4().hex[:16]}",
@@ -47,6 +52,7 @@ class ConversationStore:
             workspace_id=workspace_id,
             generation=generation,
             content_digest=content_digest,
+            ge_session=ge_session,
         )
         with self._lock:
             self._items[conv.conversation_id] = conv

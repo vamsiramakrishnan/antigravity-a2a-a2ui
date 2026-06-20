@@ -12,13 +12,14 @@ materialized session — never bytes, never a credential.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Body, Depends, HTTPException
 
 from a2a_workspace.antigravity.config_builder import write_session_file
 from a2a_workspace.container import Container
 from a2a_workspace.errors import IsolationError, NotFoundError
 from a2a_workspace.gateway.dependencies import get_container, request_context
 from a2a_workspace.identity.authorization import RequestContext
+from a2a_workspace.messaging import materialize_inputs, parse_invocation
 
 router = APIRouter()
 
@@ -85,15 +86,24 @@ def agent_card(container: Container = Depends(get_container)) -> dict:
 def invoke(
     ctx: RequestContext = Depends(request_context),
     container: Container = Depends(get_container),
+    body: dict | None = Body(default=None),
 ) -> dict:
     """Start (or resume) a session for the verified principal.
+
+    ``body`` is the A2A invocation Gemini Enterprise sends: a ``message`` whose
+    ``parts`` carry the user's prompt and uploaded files, plus the Discovery
+    Engine ``session``. We parse it, materialize uploaded files into the session's
+    ``inputs/`` directory (so the agent can operate on them as files), and thread
+    the session through so connector calls share its context.
 
     Idempotent provisioning happens first, then the lifecycle materializes the
     active generation and pins a conversation to it.
     """
+    invocation = parse_invocation(body)
+
     container.provisioner.ensure_provisioned(ctx.principal)
     try:
-        started = container.lifecycle.start(ctx)
+        started = container.lifecycle.start(ctx, ge_session=invocation.ge_session)
     except NotFoundError as exc:
         # No active generation yet: the workspace exists but has no published
         # revision. This is a normal first-run state, not an error condition.
@@ -105,17 +115,28 @@ def invoke(
         raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     conv = started.conversation
+
+    # Materialize uploaded files into the session's inputs/ directory so the agent
+    # can open and process them as real files (not conversation text).
+    input_manifest = materialize_inputs(
+        started.materialized.inputs_dir, invocation.files
+    )
+
     response = {
         "conversation_id": conv.conversation_id,
         "workspace_id": conv.workspace_id,
         "generation": conv.generation,
         "content_digest": conv.content_digest,
+        "prompt": invocation.prompt,
         # Filesystem paths only — no bytes, no tokens.
         "connection": {
             "skills_paths": list(started.connection.skills_paths),
             "app_data_dir": started.connection.app_data_dir,
+            "inputs_dir": str(started.materialized.inputs_dir),
+            "work_dir": str(started.materialized.work_dir),
             "read_only_skills": started.connection.read_only_skills,
         },
+        "inputs": [{"name": e["name"], "mime_type": e["mime_type"]} for e in input_manifest],
     }
 
     # If Gemini Enterprise is configured and the request carried the user's
@@ -128,13 +149,17 @@ def invoke(
             principal_key=ctx.principal.key, conversation_id=conv.conversation_id
         )
         container.session_credentials.put(
-            conv.conversation_id, ctx.tool_credential.secret
+            conv.conversation_id,
+            ctx.tool_credential.secret,
+            ge_session=invocation.ge_session,
         )
         write_session_file(
             app_data_dir=started.materialized.app_data_dir,
             gateway_url=container.config.public_url,
             session_token=session_token,
             conversation_id=conv.conversation_id,
+            inputs_dir=started.materialized.inputs_dir,
+            work_dir=started.materialized.work_dir,
         )
         response["enterprise"] = {
             "enabled": True,
