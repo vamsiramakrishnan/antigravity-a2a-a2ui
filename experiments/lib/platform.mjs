@@ -54,7 +54,9 @@ export async function createAgent(client, cfg, spec) {
 
 export async function deleteAgent(client, cfg, id) {
   const name = fqAgent(cfg, id);
-  for (const arg of [{ name }, name, { id }]) {
+  // @google/genai v2.9.0: agents.delete(id: string, ...). Pass the short id
+  // first; fall back to the FQ name / object shapes for older/newer signatures.
+  for (const arg of [id, name, { id }, { name }]) {
     try {
       await client.agents.delete(arg);
       return true;
@@ -85,7 +87,14 @@ function shallow(ev) {
   }
 }
 
-export async function runInteraction(client, cfg, agentId, input) {
+// A freshly-created managed agent's sandbox is provisioned asynchronously, so
+// the first interactions.create often returns 400 "Resource setup is in
+// progress. Please try again shortly." Retry on that (and similar not-ready
+// signals) with a fixed backoff until the sandbox is up.
+const SETUP_RE =
+  /resource setup is in progress|setup is in progress|please try again shortly|not ready|currently being created|being provisioned|try again/i;
+
+async function attemptInteraction(client, cfg, agentId, input) {
   const raw = [];
   let text = "";
   const collect = (async () => {
@@ -95,7 +104,9 @@ export async function runInteraction(client, cfg, agentId, input) {
       environment: { type: "remote" },
       stream: true,
       store: true,
-      background: false,
+      // The managed-agents Interactions API rejects background:false for these
+      // code-execution workflows ("400 Setting background=true is required").
+      background: true,
     });
     for await (const ev of stream) {
       if (raw.length < 60) raw.push(shallow(ev));
@@ -105,10 +116,30 @@ export async function runInteraction(client, cfg, agentId, input) {
   const timeout = new Promise((_, rej) =>
     setTimeout(() => rej(new Error("interaction timeout")), cfg.timeoutMs),
   );
-  try {
-    await Promise.race([collect, timeout]);
-    return { ok: true, text, raw };
-  } catch (e) {
-    return { ok: false, error: String(e?.message || e), text, raw };
+  await Promise.race([collect, timeout]);
+  return { text, raw };
+}
+
+export async function runInteraction(client, cfg, agentId, input) {
+  const maxAttempts = 20;
+  const waitMs = 15000;
+  let last = { text: "", raw: [], error: "" };
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const { text, raw } = await attemptInteraction(client, cfg, agentId, input);
+      return { ok: true, text, raw, attempts: attempt };
+    } catch (e) {
+      const error = String(e?.message || e);
+      last = { text: "", raw: [], error };
+      if (SETUP_RE.test(error) && attempt < maxAttempts) {
+        process.stderr.write(
+          `    ${agentId}: sandbox not ready (attempt ${attempt}/${maxAttempts}): ${error} — waiting ${waitMs / 1000}s\n`,
+        );
+        await new Promise((r) => setTimeout(r, waitMs));
+        continue;
+      }
+      return { ok: false, error, text: last.text, raw: last.raw, attempts: attempt };
+    }
   }
+  return { ok: false, error: last.error, text: last.text, raw: last.raw, attempts: maxAttempts };
 }

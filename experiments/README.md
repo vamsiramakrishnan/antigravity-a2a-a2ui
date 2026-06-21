@@ -47,6 +47,19 @@ echo hi | gcloud storage cp - $GCS_BUCKET/workspaces/userB/hello.txt
 npm run all                   # or: identity | two-agents | cross-tenant | controls | mcp | cleanup
 ```
 
+## Raw REST probe (no SDK)
+
+To see the exact wire shapes the `@google/genai` client hides — or to debug
+auth/endpoint issues — run the curl twin of probe 01. It creates a throwaway
+`probe-rest-1`, fires one `echo HELLO_SANDBOX && whoami && id` interaction over
+the Interactions REST API, and streams the raw SSE back:
+
+```bash
+cd experiments
+./probes/rest_identity.sh        # reads ../.env; deletes the agent on exit
+KEEP=1 ./probes/rest_identity.sh # keep probe-rest-1 for manual poking
+```
+
 ## What each result means (and what I change because of it)
 
 | Experiment | Status | What it tells us → action |

@@ -12,4 +12,5 @@ export const PROBE_IDS = [
   "probe-controls-caps",
   "probe-controls-net",
   "probe-mcp",
+  "probe-rest-1",
 ];
